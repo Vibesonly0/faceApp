@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AuraVault — Personal Digital Vault & Security Hub</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Google MediaPipe Real-Time High-Speed FaceMesh AI (WASM / GPU Accelerated) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+</head>
+<body class="light-theme">
+  <!-- Toast Notifications -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- ================= BIOMETRIC LOCK SCREEN OVERLAY ================= -->
+  <div id="lock-screen" class="lock-overlay">
+    <div class="lock-container-card">
+      <div class="lock-header">
+        <div class="lock-logo-badge">
+          <i data-lucide="shield-check" class="icon-purple"></i>
+        </div>
+        <h2 id="lock-greeting">Welcome to AuraVault</h2>
+        <p class="lock-sub">Your personal, biometric-protected digital sanctuary</p>
+      </div>
+
+      <!-- Mode Selector -->
+      <div class="lock-mode-pills">
+        <button id="lock-btn-face" class="pill-btn active" onclick="switchLockMode('face')">
+          <i data-lucide="scan-face"></i> Face Unlock
+        </button>
+        <button id="lock-btn-pin" class="pill-btn" onclick="switchLockMode('pin')">
+          <i data-lucide="key-round"></i> PIN / Password
+        </button>
+        <button id="lock-btn-setup" class="pill-btn" onclick="switchLockMode('setup')">
+          <i data-lucide="user-plus"></i> Setup Profile
+        </button>
+      </div>
+
+      <!-- Live Face Scanner Mode -->
+      <div id="lock-scanner-panel" class="lock-mode-panel">
+        <div class="camera-outer-wrapper">
+          <div class="camera-viewport">
+            <video id="webcam-video" autoplay muted playsinline></video>
+            <canvas id="webcam-overlay"></canvas>
+            <div class="camera-laser"></div>
+            <div class="scanner-frame">
+              <span class="bracket tl"></span>
+              <span class="bracket tr"></span>
+              <span class="bracket bl"></span>
+              <span class="bracket br"></span>
+            </div>
+            <div id="scan-badge" class="scan-state-badge">Scanning Face</div>
+          </div>
+        </div>
+
+        <div class="lock-meter-container">
+          <div class="meter-track">
+            <div id="confidence-bar" class="meter-fill" style="width: 0%;"></div>
+          </div>
+          <p id="scanner-status" class="lock-hint-text">Position your face in front of the camera...</p>
+        </div>
+
+        <!-- Setup Form shown in Setup Mode -->
+        <div id="lock-setup-fields" class="lock-setup-fields hidden">
+          <div class="field-group">
+            <label>Your Full Name</label>
+            <input type="text" id="setup-name" placeholder="e.g. Alex Morgan" class="clean-input">
+          </div>
+          <div class="field-group">
+            <label>Create Vault Master PIN</label>
+            <input type="password" id="setup-pin" maxlength="8" placeholder="4 to 8 digits" class="clean-input mono">
+          </div>
+          <button class="btn btn-purple btn-block" onclick="captureAndEnrollFace()">
+            <i data-lucide="camera"></i> Save Face & Register Profile
+          </button>
+        </div>
+      </div>
+
+      <!-- Master PIN / Password Unlock Panel -->
+      <div id="lock-pin-panel" class="lock-mode-panel hidden">
+        <div class="pin-card-box">
+          <p class="lock-hint-text">Enter your Master PIN or Password to unlock</p>
+          <div class="pin-display-wrapper">
+            <input type="password" id="pin-display-input" class="clean-input mono pin-input-lg" placeholder="••••" readonly>
+          </div>
+          <div class="keypad-grid">
+            <button class="key-btn" onclick="pressPin('1')">1</button>
+            <button class="key-btn" onclick="pressPin('2')">2</button>
+            <button class="key-btn" onclick="pressPin('3')">3</button>
+            <button class="key-btn" onclick="pressPin('4')">4</button>
+            <button class="key-btn" onclick="pressPin('5')">5</button>
+            <button class="key-btn" onclick="pressPin('6')">6</button>
+            <button class="key-btn" onclick="pressPin('7')">7</button>
+            <button class="key-btn" onclick="pressPin('8')">8</button>
+            <button class="key-btn" onclick="pressPin('9')">9</button>
+            <button class="key-btn key-text" onclick="clearPin()">Clear</button>
+            <button class="key-btn" onclick="pressPin('0')">0</button>
+            <button class="key-btn key-action" onclick="verifyPinUnlock()"><i data-lucide="check"></i></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="lock-bottom-row">
+        <button class="text-link" onclick="quickBypassToSetup()">Need to reset face or PIN?</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MAIN APPLICATION LAYOUT ================= -->
+  <div id="app-container" class="app-layout hidden">
+    
+    <!-- LEFT SIDEBAR NAVIGATION -->
+    <aside class="sidebar">
+      <!-- Brand Logo -->
+      <div class="sidebar-brand">
+        <div class="brand-avatar">
+          <i data-lucide="shield-check" class="brand-avatar-icon"></i>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">AuraVault</span>
+          <span class="brand-tagline">Personal Hub</span>
+        </div>
+      </div>
+
+      <!-- Navigation Links -->
+      <nav class="sidebar-menu">
+        <div class="menu-label">Main Vault</div>
+        <button class="nav-item active" data-tab="diary" onclick="switchTab('diary')">
+          <div class="nav-icon-box bg-purple-soft"><i data-lucide="book-open" class="icon-purple"></i></div>
+          <span class="nav-title">Personal Diary</span>
+          <span class="nav-badge bg-purple-soft" id="badge-diary-count">0</span>
+        </button>
+
+        <button class="nav-item" data-tab="finance" onclick="switchTab('finance')">
+          <div class="nav-icon-box bg-orange-soft"><i data-lucide="wallet" class="icon-orange"></i></div>
+          <span class="nav-title">Income & Savings</span>
+        </button>
+
+        <button class="nav-item" data-tab="secrets" onclick="switchTab('secrets')">
+          <div class="nav-icon-box bg-green-soft"><i data-lucide="key" class="icon-green"></i></div>
+          <span class="nav-title">Secret Codes & Notes</span>
+          <span class="nav-badge bg-green-soft" id="badge-secret-count">0</span>
+        </button>
+
+        <button class="nav-item" data-tab="twofa" onclick="switchTab('twofa')">
+          <div class="nav-icon-box bg-lemon-soft"><i data-lucide="shield-alert" class="icon-lemon"></i></div>
+          <span class="nav-title">2FA Backup Codes</span>
+          <span class="nav-badge bg-lemon-soft" id="badge-twofa-count">0</span>
+        </button>
+
+        <div class="menu-label" style="margin-top: 18px;">Account & Security</div>
+        <button class="nav-item" data-tab="settings" onclick="switchTab('settings')">
+          <div class="nav-icon-box bg-purple-soft"><i data-lucide="user-cog" class="icon-purple"></i></div>
+          <span class="nav-title">User Profile & Settings</span>
+        </button>
+      </nav>
+
+      <!-- Sidebar Footer (Lock & User Mini Card) -->
+      <div class="sidebar-footer">
+        <div class="user-mini-card" onclick="switchTab('settings')">
+          <div class="user-avatar" id="sidebar-user-avatar">U</div>
+          <div class="user-info">
+            <span class="user-name" id="sidebar-user-name">Vault Owner</span>
+            <span class="user-role">Decrypted & Active</span>
+          </div>
+        </div>
+        <button class="btn-lock-sidebar" onclick="lockVault()" title="Lock Vault Now">
+          <i data-lucide="lock"></i>
+          <span>Lock Vault</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- RIGHT MAIN CONTENT WORKSPACE -->
+    <main class="main-content">
+      <!-- Top Header Bar -->
+      <header class="top-navbar">
+        <div class="top-title-area">
+          <h1 id="page-title">Personal Diary</h1>
+          <p id="page-subtitle" class="page-subtitle">Your private daily thoughts, ideas, and reflections.</p>
+        </div>
+
+        <div class="top-actions">
+          <!-- Backup & Restore Dropdown -->
+          <div class="dropdown">
+            <button class="btn btn-white" onclick="toggleDropdown('backup-dd')">
+              <i data-lucide="hard-drive-download"></i> <span>Vault Backup</span> <i data-lucide="chevron-down" style="width: 14px;"></i>
+            </button>
+            <div id="backup-dd" class="dropdown-menu hidden">
+              <button onclick="exportVaultJSON()"><i data-lucide="download"></i> Export Vault JSON</button>
+              <label for="import-file-input" class="dropdown-file-label">
+                <i data-lucide="upload"></i> Import Vault JSON
+              </label>
+              <input type="file" id="import-file-input" accept=".json" class="hidden" onchange="importVaultJSON(event)">
+            </div>
+          </div>
+
+          <!-- User Quick Profile Pill -->
+          <button class="user-pill-btn" onclick="switchTab('settings')">
+            <div class="pill-dot"></div>
+            <span id="top-user-label">Vault Profile</span>
+            <i data-lucide="settings" style="width: 15px; margin-left: 4px;"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Content Views -->
+      <div class="content-body">
+
+        <!-- ================= 1. PERSONAL DIARY TAB ================= -->
+        <section id="view-diary" class="tab-view active">
+          <div class="view-header-strip">
+            <div class="strip-stats">
+              <span class="stat-pill"><strong id="diary-total-count">0</strong> total stories</span>
+            </div>
+            <button class="btn btn-purple" onclick="openNewDiaryModal()">
+              <i data-lucide="plus"></i> New Journal Entry
+            </button>
+          </div>
+
+          <!-- Search & Filter Card -->
+          <div class="white-card filter-card">
+            <div class="search-input-box">
+              <i data-lucide="search"></i>
+              <input type="text" id="diary-search" placeholder="Search by title, memories or notes..." oninput="renderDiary()">
+            </div>
+            <div class="filter-row">
+              <div class="filter-item">
+                <label>Mood</label>
+                <select id="diary-mood-filter" onchange="renderDiary()" class="clean-select">
+                  <option value="ALL">All Moods</option>
+                  <option value="⚡ Productive">⚡ Productive</option>
+                  <option value="😊 Joyful">😊 Joyful</option>
+                  <option value="🧘 Peaceful">🧘 Peaceful</option>
+                  <option value="🤔 Reflective">🤔 Reflective</option>
+                  <option value="🌧️ Stressed">🌧️ Stressed</option>
+                </select>
+              </div>
+              <div class="filter-item">
+                <label>Date</label>
+                <input type="date" id="diary-date-filter" onchange="renderDiary()" class="clean-select">
+              </div>
+              <button class="btn btn-ghost" onclick="clearDiaryFilters()">Reset Filters</button>
+            </div>
+          </div>
+
+          <!-- Diary Grid -->
+          <div id="diary-grid" class="cards-grid">
+            <!-- Dynamically Rendered -->
+          </div>
+        </section>
+
+        <!-- ================= 2. INCOME & SAVINGS TAB ================= -->
+        <section id="view-finance" class="tab-view">
+          <div class="view-header-strip">
+            <div>
+              <h3>Financial Balances & Ledger</h3>
+            </div>
+            <div class="strip-actions">
+              <button class="btn btn-white" onclick="openSavingsGoalModal()">
+                <i data-lucide="target" class="icon-orange"></i> Edit Goal
+              </button>
+              <button class="btn btn-orange" onclick="openNewTransactionModal()">
+                <i data-lucide="plus"></i> Log Transaction
+              </button>
+            </div>
+          </div>
+
+          <!-- 3 Colored Summary Cards -->
+          <div class="finance-cards-row">
+            <div class="finance-card card-income">
+              <div class="finance-card-top">
+                <span>Total Income</span>
+                <div class="f-icon-box bg-green-soft"><i data-lucide="arrow-down-left" class="icon-green"></i></div>
+              </div>
+              <div class="f-amount text-green" id="kpi-income">$0.00</div>
+              <div class="f-sub">All cash inflows & deposits</div>
+            </div>
+
+            <div class="finance-card card-expense">
+              <div class="finance-card-top">
+                <span>Total Expenses</span>
+                <div class="f-icon-box bg-orange-soft"><i data-lucide="arrow-up-right" class="icon-orange"></i></div>
+              </div>
+              <div class="f-amount text-orange" id="kpi-expense">$0.00</div>
+              <div class="f-sub">Total outgoing spendings</div>
+            </div>
+
+            <div class="finance-card card-net">
+              <div class="finance-card-top">
+                <span>Net Savings Reserve</span>
+                <div class="f-icon-box bg-purple-soft"><i data-lucide="piggy-bank" class="icon-purple"></i></div>
+              </div>
+              <div class="f-amount text-purple" id="kpi-net">$0.00</div>
+              <div class="f-sub">Liquid funds available</div>
+            </div>
+          </div>
+
+          <!-- Savings Target Progress Bar -->
+          <div class="white-card goal-card">
+            <div class="goal-card-header">
+              <div>
+                <span class="tag-badge bg-orange-soft text-orange">🎯 Financial Target</span>
+                <h4 id="goal-title-display">Emergency & Investment Fund</h4>
+              </div>
+              <div class="goal-values">
+                <span id="goal-progress-text" class="mono font-bold">$0 / $10,000</span>
+                <span id="goal-percentage" class="percent-tag">0%</span>
+              </div>
+            </div>
+            <div class="goal-track">
+              <div id="goal-progress-bar" class="goal-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <!-- Ledger Table -->
+          <div class="white-card table-card">
+            <div class="table-card-head">
+              <h4>Recent Transactions</h4>
+              <span id="tx-count" class="tag-badge bg-light">0 records</span>
+            </div>
+            <div class="table-responsive">
+              <table class="aura-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Category</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th style="text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="finance-table-body">
+                  <!-- Dynamically Rendered -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= 3. SECRET CODES & NOTES TAB ================= -->
+        <section id="view-secrets" class="tab-view">
+          <div class="view-header-strip">
+            <div>
+              <h3>Private Credentials & Secure Notes</h3>
+            </div>
+            <button class="btn btn-green" onclick="openNewSecretModal()">
+              <i data-lucide="shield-plus"></i> Store New Secret
+            </button>
+          </div>
+
+          <div class="white-card filter-card">
+            <div class="search-input-box">
+              <i data-lucide="search"></i>
+              <input type="text" id="secret-search" placeholder="Search by title, service, username..." oninput="renderSecrets()">
+            </div>
+            <div class="filter-row">
+              <div class="filter-item">
+                <label>Category</label>
+                <select id="secret-category-filter" onchange="renderSecrets()" class="clean-select">
+                  <option value="ALL">All Categories</option>
+                  <option value="PIN">Security PIN</option>
+                  <option value="Seed Phrase">Crypto / Seed Phrase</option>
+                  <option value="API Key">API Key / Token</option>
+                  <option value="Password">Master Password</option>
+                  <option value="Note">Private Note</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div id="secrets-grid" class="cards-grid">
+            <!-- Dynamically Rendered -->
+          </div>
+        </section>
+
+        <!-- ================= 4. GOOGLE 2FA BACKUP CODES TAB ================= -->
+        <section id="view-twofa" class="tab-view">
+          <div class="view-header-strip">
+            <div>
+              <h3>Google Authenticator & 2FA Backup Vault</h3>
+              <p class="section-desc">Store emergency one-time 8-digit and 10-digit authentication backup codes.</p>
+            </div>
+            <button class="btn btn-ghost text-orange" onclick="clearUsed2FACodes()">
+              <i data-lucide="trash-2"></i> Clean Up Used Codes
+            </button>
+          </div>
+
+          <!-- Bulk Paste Ingest Card -->
+          <div class="white-card bulk-ingest-card">
+            <h4 class="card-title-sm"><i data-lucide="file-plus" class="icon-lemon"></i> Bulk Paste Backup Codes</h4>
+            <p class="card-desc-sm">Paste any copied list of codes from Google, GitHub, or AWS. Our parser automatically separates and formats 8-digit and 10-digit codes.</p>
+            
+            <div class="bulk-form-grid">
+              <input type="text" id="twofa-account-tag" placeholder="Account Name (e.g. personal@gmail.com)" class="clean-input">
+              <textarea id="twofa-bulk-input" rows="2" placeholder="Paste codes here (e.g. 1234 5678, 98765432, 12345 67890)..." class="clean-input mono"></textarea>
+              <button class="btn btn-lemon" onclick="bulkImport2FACodes()">
+                <i data-lucide="check"></i> Ingest & Format Codes
+              </button>
+            </div>
+          </div>
+
+          <div class="strip-stats" style="margin-bottom: 16px;">
+            <span class="stat-pill" id="twofa-stats-pill">0 Total Codes (0 Available)</span>
+          </div>
+
+          <div id="twofa-grid" class="twofa-grid-layout">
+            <!-- Dynamically Rendered -->
+          </div>
+        </section>
+
+        <!-- ================= 5. USER PROFILE & SETTINGS TAB ================= -->
+        <section id="view-settings" class="tab-view">
+          <div class="settings-page-grid">
+            
+            <!-- Left Card: Profile & Identity -->
+            <div class="white-card settings-card">
+              <div class="settings-card-head">
+                <div class="icon-badge bg-purple-soft"><i data-lucide="user" class="icon-purple"></i></div>
+                <div>
+                  <h4>User Profile</h4>
+                  <p class="card-desc-sm">Manage your vault display name and owner details</p>
+                </div>
+              </div>
+
+              <div class="profile-preview-box">
+                <div class="big-avatar" id="settings-avatar-circle">A</div>
+                <div>
+                  <h3 id="settings-display-name">Alex Morgan</h3>
+                  <span class="tag-badge bg-green-soft text-green"><i data-lucide="shield-check" style="width:12px;"></i> Biometrically Verified</span>
+                </div>
+              </div>
+
+              <form onsubmit="handleSaveProfileName(event)">
+                <div class="field-group">
+                  <label>Change Vault Owner Name</label>
+                  <input type="text" id="settings-name-input" required class="clean-input" placeholder="Your name">
+                </div>
+                <button type="submit" class="btn btn-purple">
+                  <i data-lucide="save"></i> Update Name
+                </button>
+              </form>
+            </div>
+
+            <!-- Middle Card: PIN & Password Security -->
+            <div class="white-card settings-card">
+              <div class="settings-card-head">
+                <div class="icon-badge bg-orange-soft"><i data-lucide="key-round" class="icon-orange"></i></div>
+                <div>
+                  <h4>Master PIN & Password</h4>
+                  <p class="card-desc-sm">Change your fallback unlock code</p>
+                </div>
+              </div>
+
+              <form onsubmit="handleSaveMasterPin(event)">
+                <div class="field-group">
+                  <label>Current Master PIN</label>
+                  <input type="password" id="pin-current-input" required class="clean-input mono" placeholder="••••">
+                </div>
+                <div class="field-group">
+                  <label>New Master PIN (4 to 8 digits)</label>
+                  <input type="password" id="pin-new-input" maxlength="8" required class="clean-input mono" placeholder="••••">
+                </div>
+                <button type="submit" class="btn btn-orange">
+                  <i data-lucide="lock"></i> Update Master PIN
+                </button>
+              </form>
+            </div>
+
+            <!-- Right Card: Face ID Biometrics Re-Registration -->
+            <div class="white-card settings-card">
+              <div class="settings-card-head">
+                <div class="icon-badge bg-green-soft"><i data-lucide="scan-face" class="icon-green"></i></div>
+                <div>
+                  <h4>Face ID Biometrics</h4>
+                  <p class="card-desc-sm">Re-scan or update your facial recognition vector</p>
+                </div>
+              </div>
+
+              <div class="face-status-box">
+                <div class="face-status-indicator">
+                  <span class="status-indicator-dot online"></span>
+                  <span id="settings-face-status">Face Profile Active & Stored</span>
+                </div>
+                <p class="card-desc-sm">If you changed your hair, glasses, or lighting, you can re-enroll your facial descriptor right here.</p>
+              </div>
+
+              <div class="settings-action-buttons">
+                <button class="btn btn-green btn-block" onclick="startSettingsFaceReEnroll()">
+                  <i data-lucide="camera"></i> Re-Scan & Update Face ID
+                </button>
+                <button class="btn btn-ghost text-orange btn-block" onclick="removeFaceIdProfile()">
+                  <i data-lucide="trash-2"></i> Remove Face Biometrics
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ================= MODALS ================= -->
+
+  <!-- 1. Diary Entry Modal -->
+  <div id="modal-diary" class="modal-backdrop hidden">
+    <div class="clean-modal-box">
+      <div class="modal-title-bar">
+        <h3 id="diary-modal-title">Write Journal Entry</h3>
+        <button class="close-modal-btn" onclick="closeModal('modal-diary')"><i data-lucide="x"></i></button>
+      </div>
+      <form id="diary-form" onsubmit="handleDiarySubmit(event)">
+        <input type="hidden" id="diary-edit-id">
+        <div class="field-group">
+          <label>Entry Title</label>
+          <input type="text" id="diary-title" required placeholder="What happened today?" class="clean-input">
+        </div>
+        <div class="field-row two-cols">
+          <div class="field-group">
+            <label>Date</label>
+            <input type="date" id="diary-date" required class="clean-input">
+          </div>
+          <div class="field-group">
+            <label>Mood</label>
+            <select id="diary-mood" class="clean-select">
+              <option value="⚡ Productive">⚡ Productive</option>
+              <option value="😊 Joyful">😊 Joyful</option>
+              <option value="🧘 Peaceful">🧘 Peaceful</option>
+              <option value="🤔 Reflective">🤔 Reflective</option>
+              <option value="🌧️ Stressed">🌧️ Stressed</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-group">
+          <label>Journal Story</label>
+          <textarea id="diary-body" rows="6" required placeholder="Write your private entry..." class="clean-input"></textarea>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-ghost" onclick="closeModal('modal-diary')">Cancel</button>
+          <button type="submit" class="btn btn-purple"><i data-lucide="check"></i> Save Journal</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. Transaction Modal -->
+  <div id="modal-transaction" class="modal-backdrop hidden">
+    <div class="clean-modal-box">
+      <div class="modal-title-bar">
+        <h3>Log Transaction</h3>
+        <button class="close-modal-btn" onclick="closeModal('modal-transaction')"><i data-lucide="x"></i></button>
+      </div>
+      <form id="transaction-form" onsubmit="handleTransactionSubmit(event)">
+        <div class="field-row two-cols">
+          <div class="field-group">
+            <label>Type</label>
+            <select id="tx-type" class="clean-select">
+              <option value="income">Income (+ Deposit)</option>
+              <option value="expense">Expense (- Payment)</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label>Amount ($)</label>
+            <input type="number" step="0.01" min="0.01" id="tx-amount" required placeholder="0.00" class="clean-input mono">
+          </div>
+        </div>
+        <div class="field-group">
+          <label>Description</label>
+          <input type="text" id="tx-desc" required placeholder="e.g. Freelance Consulting, Groceries, Rent" class="clean-input">
+        </div>
+        <div class="field-row two-cols">
+          <div class="field-group">
+            <label>Category</label>
+            <input type="text" id="tx-category" list="cat-suggestions" placeholder="e.g. Salary, Utilities, Food" class="clean-input">
+            <datalist id="cat-suggestions">
+              <option value="Salary"><option value="Freelance"><option value="Investments">
+              <option value="Housing"><option value="Food & Dining"><option value="Tech & Hardware">
+            </datalist>
+          </div>
+          <div class="field-group">
+            <label>Date</label>
+            <input type="date" id="tx-date" required class="clean-input">
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-ghost" onclick="closeModal('modal-transaction')">Cancel</button>
+          <button type="submit" class="btn btn-orange"><i data-lucide="check"></i> Record Transaction</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. Savings Goal Modal -->
+  <div id="modal-goal" class="modal-backdrop hidden">
+    <div class="clean-modal-box">
+      <div class="modal-title-bar">
+        <h3>Adjust Savings Target</h3>
+        <button class="close-modal-btn" onclick="closeModal('modal-goal')"><i data-lucide="x"></i></button>
+      </div>
+      <form id="goal-form" onsubmit="handleSavingsGoalSubmit(event)">
+        <div class="field-group">
+          <label>Target Name</label>
+          <input type="text" id="goal-title-input" required placeholder="e.g. Emergency Fund, New Car" class="clean-input">
+        </div>
+        <div class="field-group">
+          <label>Target Amount ($)</label>
+          <input type="number" step="100" min="10" id="goal-target-amount" required placeholder="10000" class="clean-input mono">
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-ghost" onclick="closeModal('modal-goal')">Cancel</button>
+          <button type="submit" class="btn btn-orange"><i data-lucide="check"></i> Update Goal</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. Secret Item Modal -->
+  <div id="modal-secret" class="modal-backdrop hidden">
+    <div class="clean-modal-box">
+      <div class="modal-title-bar">
+        <h3 id="secret-modal-title">Store New Secret</h3>
+        <button class="close-modal-btn" onclick="closeModal('modal-secret')"><i data-lucide="x"></i></button>
+      </div>
+      <form id="secret-form" onsubmit="handleSecretSubmit(event)">
+        <input type="hidden" id="secret-edit-id">
+        <div class="field-group">
+          <label>Item Name / Service</label>
+          <input type="text" id="secret-title" required placeholder="e.g. Ledger Nano Seed, AWS Root Token" class="clean-input">
+        </div>
+        <div class="field-row two-cols">
+          <div class="field-group">
+            <label>Category</label>
+            <select id="secret-category" class="clean-select">
+              <option value="PIN">Security PIN</option>
+              <option value="Seed Phrase">Crypto / Seed Phrase</option>
+              <option value="API Key">API Key / Token</option>
+              <option value="Password">Master Password</option>
+              <option value="Note">Private Note</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label>Username / Account ID (Optional)</label>
+            <input type="text" id="secret-identifier" placeholder="e.g. admin@crypto.org" class="clean-input">
+          </div>
+        </div>
+        <div class="field-group">
+          <label>Confidential Value / Passphrase</label>
+          <textarea id="secret-value" rows="3" required placeholder="Enter confidential value..." class="clean-input mono"></textarea>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-ghost" onclick="closeModal('modal-secret')">Cancel</button>
+          <button type="submit" class="btn btn-green"><i data-lucide="shield-check"></i> Encrypt & Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
